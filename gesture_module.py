@@ -27,14 +27,12 @@ class GestureRecognizer:
 
     @classmethod
     def _extended(cls, landmarks, tip, pip):
-        # Palm-relative distance is more tolerant of different hand sizes than
-        # a fixed pixel threshold. The second check avoids classifying a bent
-        # finger as extended just because the hand is tilted.
+        # Compare each fingertip to its middle joint relative to the wrist.
+        # This works for more hand angles than a fixed "tip above joint" test.
         wrist = landmarks[0]
         tip_distance = cls._distance(landmarks[tip], wrist)
         pip_distance = cls._distance(landmarks[pip], wrist)
-        vertical_extension = landmarks[tip].y < landmarks[pip].y - 0.012
-        return tip_distance > pip_distance * 1.12 and vertical_extension
+        return tip_distance > pip_distance * 1.16
 
     def process_frame(self, frame):
         rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
