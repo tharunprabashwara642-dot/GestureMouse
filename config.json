@@ -5,11 +5,11 @@
   "mirror_preview": true,
   "smoothing": 0.78,
   "active_margin": 0.16,
-  "cursor_sensitivity": 1.25,
-  "scroll_speed": 30,
-  "scroll_threshold": 0.004,
+  "cursor_sensitivity": 1.35,
+  "scroll_speed": 900,
   "click_cooldown": 0.45,
   "confidence_threshold": 0.55,
   "show_landmarks": true,
-  "gesture_confirm_frames": 2
+  "gesture_confirm_frames": 2,
+  "cursor_hand": "Right"
 }
