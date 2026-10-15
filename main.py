@@ -12,10 +12,10 @@ CONFIG_PATH = APP_DIR / "config.json"
 DEFAULT_CONFIG = {
     "camera_index": 0, "frame_width": 640, "frame_height": 480,
     "mirror_preview": True, "smoothing": 0.78, "active_margin": 0.16,
-    "cursor_sensitivity": 1.25, "scroll_speed": 30,
-    "scroll_threshold": 0.004, "click_cooldown": 0.45,
-    "confidence_threshold": 0.55, "show_landmarks": True,
-    "gesture_confirm_frames": 2,
+    "cursor_sensitivity": 1.35, "scroll_speed": 900,
+    "click_cooldown": 0.45, "confidence_threshold": 0.55,
+    "show_landmarks": True, "gesture_confirm_frames": 2,
+    "cursor_hand": "Right",
 }
 
 
@@ -39,10 +39,18 @@ def main():
         print(f"[ERROR] {exc}")
         return 1
 
-    print("Gesture Mouse — responsive local hand-gesture controller")
+    cursor_hand = str(cfg["cursor_hand"]).capitalize()
+    if cursor_hand not in ("Left", "Right"):
+        cursor_hand = "Right"
+    action_hand = "Left" if cursor_hand == "Right" else "Right"
+
+    print("Gesture Mouse — two-hand controller")
+    print(f"Cursor hand: {cursor_hand} | Click hand: {action_hand}")
+    print(f"{cursor_hand} hand: index = move | index+middle = smooth scroll")
+    print(f"{action_hand} hand: index = single click | index+middle = double-click")
     print("Starts PAUSED. Focus preview window: P pause/resume; Q or ESC quits.")
-    print("Gestures: index = move | pinch thumb+index = click | index+middle = scroll")
     print("Safety: move cursor to top-left corner to trigger PyAutoGUI fail-safe.")
+
     camera = CameraManager(cfg["camera_index"], cfg["frame_width"],
                            cfg["frame_height"], cfg["mirror_preview"])
     recognizer = None
@@ -62,11 +70,10 @@ def main():
         return 1
 
     paused = True
-    scroll_prev_y = None
     open_palm_frames = 0
-    raw_candidate = None
-    candidate_frames = 0
-    stable_gesture = "NEUTRAL"
+    candidates = {}
+    candidate_counts = {}
+    stable = {}
     confirm_frames = max(1, int(cfg["gesture_confirm_frames"]))
     window = "Gesture Mouse Controller"
     cv2.namedWindow(window, cv2.WINDOW_NORMAL)
@@ -77,64 +84,72 @@ def main():
                 print("[ERROR] Camera frame lost; stopping for safety.")
                 break
             h, w = frame.shape[:2]
-            hand, raw_gesture, data = recognizer.process_frame(frame)
-            recognizer.draw(frame, hand)
+            items = recognizer.process_frame(frame)
+            recognizer.draw(frame, items)
 
-            if raw_gesture == raw_candidate:
-                candidate_frames += 1
-            else:
-                raw_candidate = raw_gesture
-                candidate_frames = 1
+            for item in items:
+                label = item["label"]
+                gesture = item["gesture"]
+                if label not in ("Left", "Right"):
+                    continue
+                if candidates.get(label) == gesture:
+                    candidate_counts[label] = candidate_counts.get(label, 0) + 1
+                else:
+                    candidates[label] = gesture
+                    candidate_counts[label] = 1
+                if candidate_counts[label] >= confirm_frames:
+                    stable[label] = gesture
 
-            if raw_gesture == "NO HAND":
-                stable_gesture = "NO HAND"
-            elif candidate_frames >= confirm_frames:
-                stable_gesture = raw_gesture
-
-            open_palm_frames = open_palm_frames + 1 if raw_gesture == "PAUSE" else 0
+            any_open_palm = any(item["gesture"] == "OPEN" for item in items)
+            open_palm_frames = open_palm_frames + 1 if any_open_palm else 0
             if not paused and open_palm_frames >= 5:
                 paused = True
-                scroll_prev_y = None
+                mouse.reset_scroll_filter()
                 mouse.reset_position_filter()
                 print("[STATUS] Open palm detected: PAUSED")
 
-            if not paused and data is not None:
-                if stable_gesture == "MOVE":
-                    mouse.reset_click_gesture()
-                    scroll_prev_y = None
-                    (x, y), _ = data
+            current = {item["label"]: item for item in items if item["label"] in ("Left", "Right")}
+            cursor_item = current.get(cursor_hand)
+            action_item = current.get(action_hand)
+            cursor_gesture = stable.get(cursor_hand, "NO HAND")
+            action_gesture = stable.get(action_hand, "NO HAND")
+            click_feedback = ""
+
+            if not paused:
+                if cursor_item is not None and cursor_gesture == "ONE":
+                    mouse.reset_scroll_filter()
+                    x, y = cursor_item["cursor"]
                     mouse.move_cursor(x, y)
-                elif stable_gesture == "CLICK":
-                    scroll_prev_y = None
-                    if mouse.click_once():
-                        cv2.putText(frame, "CLICK", (w - 110, 30),
-                                    cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 255), 2)
-                elif stable_gesture == "SCROLL":
-                    mouse.reset_click_gesture()
-                    _, anchor_y = data
-                    if scroll_prev_y is not None:
-                        delta = anchor_y - scroll_prev_y
-                        mouse.scroll_delta(delta, float(cfg["scroll_threshold"]))
-                    scroll_prev_y = anchor_y
+                elif cursor_item is not None and cursor_gesture == "TWO":
+                    mouse.scroll_delta(cursor_item["scroll_y"])
                 else:
+                    mouse.reset_scroll_filter()
+
+                if action_item is not None and action_gesture == "ONE":
+                    if mouse.click_once():
+                        click_feedback = "SINGLE CLICK"
+                elif action_item is not None and action_gesture == "TWO":
+                    if mouse.double_click_once():
+                        click_feedback = "DOUBLE CLICK"
+                elif action_item is not None and action_gesture not in ("NO HAND",):
                     mouse.reset_click_gesture()
-                    scroll_prev_y = None
-            else:
-                if stable_gesture != "CLICK":
-                    mouse.reset_click_gesture()
-                scroll_prev_y = None
 
             status = "PAUSED" if paused else "ACTIVE"
             color = (0, 0, 255) if paused else (0, 200, 0)
-            cv2.rectangle(frame, (0, 0), (w, 94), (25, 25, 25), -1)
-            cv2.putText(frame, f"Status: {status}", (12, 25),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.62, color, 2)
-            cv2.putText(frame, f"Gesture: {stable_gesture}", (12, 51),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.55, (255, 255, 255), 1)
-            cv2.putText(frame, "Index: move | Pinch: click | Index+middle: scroll",
-                        (12, 75), cv2.FONT_HERSHEY_SIMPLEX, 0.43, (220, 220, 220), 1)
+            cv2.rectangle(frame, (0, 0), (w, 112), (25, 25, 25), -1)
+            cv2.putText(frame, f"Status: {status}", (12, 24),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.58, color, 2, cv2.LINE_AA)
+            cv2.putText(frame, f"{cursor_hand} cursor: {cursor_gesture} | {action_hand} action: {action_gesture}",
+                        (12, 49), cv2.FONT_HERSHEY_SIMPLEX, 0.47, (255, 255, 255), 1, cv2.LINE_AA)
+            cv2.putText(frame, "Cursor hand: 1 finger=move, 2 fingers=scroll",
+                        (12, 73), cv2.FONT_HERSHEY_SIMPLEX, 0.42, (220, 220, 220), 1, cv2.LINE_AA)
+            cv2.putText(frame, "Other hand: 1 finger=click, 2 fingers=double-click",
+                        (12, 93), cv2.FONT_HERSHEY_SIMPLEX, 0.42, (220, 220, 220), 1, cv2.LINE_AA)
+            if click_feedback:
+                cv2.putText(frame, click_feedback, (w - 190, 28),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.58, (0, 255, 255), 2, cv2.LINE_AA)
             cv2.putText(frame, "P: Pause/Resume   Q/ESC: Quit", (12, h - 12),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.48, (230, 230, 230), 1)
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.45, (230, 230, 230), 1, cv2.LINE_AA)
             cv2.imshow(window, frame)
             key = cv2.waitKey(1) & 0xFF
             if key in (ord("q"), ord("Q"), 27):
@@ -142,11 +157,11 @@ def main():
             if key in (ord("p"), ord("P")):
                 paused = not paused
                 open_palm_frames = 0
-                scroll_prev_y = None
-                raw_candidate = None
-                candidate_frames = 0
-                stable_gesture = "NEUTRAL"
+                candidates.clear()
+                candidate_counts.clear()
+                stable.clear()
                 mouse.reset_click_gesture()
+                mouse.reset_scroll_filter()
                 mouse.reset_position_filter()
                 print(f"[STATUS] {'PAUSED' if paused else 'ACTIVE'}")
     except KeyboardInterrupt:
