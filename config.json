@@ -3,11 +3,13 @@
   "frame_width": 640,
   "frame_height": 480,
   "mirror_preview": true,
-  "smoothing": 0.28,
-  "active_margin": 0.08,
-  "scroll_speed": 18,
-  "scroll_threshold": 0.012,
-  "double_click_cooldown": 0.8,
-  "confidence_threshold": 0.65,
-  "show_landmarks": true
+  "smoothing": 0.78,
+  "active_margin": 0.16,
+  "cursor_sensitivity": 1.25,
+  "scroll_speed": 30,
+  "scroll_threshold": 0.004,
+  "click_cooldown": 0.45,
+  "confidence_threshold": 0.55,
+  "show_landmarks": true,
+  "gesture_confirm_frames": 2
 }
